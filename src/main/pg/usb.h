@@ -18,17 +18,14 @@
 #pragma once
 
 #include "pg/pg.h"
-#include "drivers/io.h"
 
-typedef struct sdcardConfig_s {
-    uint8_t useDma;
-    uint8_t enabled;
-    uint8_t device;
-    ioTag_t cardDetectTag;
-    ioTag_t chipSelectTag;
-    uint8_t cardDetectInverted;
-    uint8_t dmaIdentifier;
-    uint8_t dmaChannel;
-} sdcardConfig_t;
+enum USB_DEV {
+    DEFAULT,
+    COMPOSITE
+};
 
-PG_DECLARE(sdcardConfig_t, sdcardConfig);
+typedef struct usbDev_s {
+    uint8_t type;
+} usbDev_t;
+
+PG_DECLARE(usbDev_t, usbDevice);

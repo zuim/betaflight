@@ -77,6 +77,7 @@ COMMON_SRC = \
             pg/rx_pwm.c \
             pg/sdcard.c \
             pg/vcd.c \
+            pg/usb.c \
             scheduler/scheduler.c \
             sensors/adcinternal.c \
             sensors/battery.c \
@@ -382,7 +383,8 @@ SRC += \
             drivers/sdcard.c \
             drivers/sdcard_standard.c \
             io/asyncfatfs/asyncfatfs.c \
-            io/asyncfatfs/fat_standard.c
+            io/asyncfatfs/fat_standard.c \
+            $(MSC_SRC)
 endif
 
 ifneq ($(filter VCP,$(FEATURES)),)

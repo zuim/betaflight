@@ -116,7 +116,6 @@ static uint32_t blinkBits[(OSD_ITEM_COUNT + 31)/32];
 #define IS_MID(X) (rcData[X] > 1250 && rcData[X] < 1750)
 
 static timeUs_t flyTime = 0;
-static uint8_t statRssi;
 
 typedef struct statistic_s {
     timeUs_t armed_time;
@@ -124,7 +123,7 @@ typedef struct statistic_s {
     int16_t min_voltage; // /10
     int16_t max_current; // /10
     int16_t min_rssi;
-    int16_t max_altitude;
+    int32_t max_altitude;
     int16_t max_distance;
 } statistic_t;
 
@@ -627,6 +626,8 @@ static bool osdDrawSingleElement(uint8_t item)
 #define OSD_WARNINGS_MAX_SIZE 11
 #define OSD_FORMAT_MESSAGE_BUFFER_SIZE (OSD_WARNINGS_MAX_SIZE + 1)
 
+            STATIC_ASSERT(OSD_FORMAT_MESSAGE_BUFFER_SIZE <= sizeof(buff), osd_warnings_size_exceeds_buffer_size);
+
             const uint16_t enabledWarnings = osdConfig()->enabledWarnings;
 
             const batteryState_e batteryState = getBatteryState();
@@ -885,6 +886,7 @@ void pgResetFn_osdConfig(osdConfig_t *osdConfig)
     osdConfig->enabled_stats[OSD_STAT_TIMER_1]         = false;
     osdConfig->enabled_stats[OSD_STAT_TIMER_2]         = true;
     osdConfig->enabled_stats[OSD_STAT_RTC_DATE_TIME]   = false;
+    osdConfig->enabled_stats[OSD_STAT_BATTERY]         = false;
 
     osdConfig->units = OSD_UNIT_METRIC;
 
@@ -962,7 +964,7 @@ void osdUpdateAlarms(void)
 
     int32_t alt = osdGetMetersToSelectedUnit(getEstimatedAltitude()) / 100;
 
-    if (statRssi < osdConfig()->rssi_alarm) {
+    if (scaleRange(getRssi(), 0, 1024, 0, 100) < osdConfig()->rssi_alarm) {
         SET_BLINK(OSD_RSSI_VALUE);
     } else {
         CLR_BLINK(OSD_RSSI_VALUE);
@@ -1042,7 +1044,6 @@ static void osdResetStats(void)
 static void osdUpdateStats(void)
 {
     int16_t value = 0;
-
 #ifdef USE_GPS
     value = CM_S_TO_KM_H(gpsSol.groundSpeed);
 #endif
@@ -1050,8 +1051,9 @@ static void osdUpdateStats(void)
         stats.max_speed = value;
     }
 
-    if (stats.min_voltage > getBatteryVoltage()) {
-        stats.min_voltage = getBatteryVoltage();
+    value = getBatteryVoltage();
+    if (stats.min_voltage > value) {
+        stats.min_voltage = value;
     }
 
     value = getAmperage() / 100;
@@ -1059,18 +1061,23 @@ static void osdUpdateStats(void)
         stats.max_current = value;
     }
 
-    statRssi = scaleRange(getRssi(), 0, 1024, 0, 100);
-    if (stats.min_rssi > statRssi) {
-        stats.min_rssi = statRssi;
+    value = scaleRange(getRssi(), 0, 1024, 0, 100);
+    if (stats.min_rssi > value) {
+        stats.min_rssi = value;
     }
 
-    if (stats.max_altitude < getEstimatedAltitude()) {
-        stats.max_altitude = getEstimatedAltitude();
+    int altitude = getEstimatedAltitude();
+    if (stats.max_altitude < altitude) {
+        stats.max_altitude = altitude;
     }
 
 #ifdef USE_GPS
-    if (STATE(GPS_FIX) && STATE(GPS_FIX_HOME) && (stats.max_distance < GPS_distanceToHome)) {
-        stats.max_distance = GPS_distanceToHome;
+    if (STATE(GPS_FIX) && STATE(GPS_FIX_HOME)) {
+        value = GPS_distanceToHome;
+
+        if (stats.max_distance < GPS_distanceToHome) {
+            stats.max_distance = GPS_distanceToHome;
+        }
     }
 #endif
 }
@@ -1187,6 +1194,11 @@ static void osdShowStats(uint16_t endBatteryVoltage)
         osdDisplayStatisticLabel(top++, "END BATTERY", buff);
     }
 
+    if (osdConfig()->enabled_stats[OSD_STAT_BATTERY]) {
+        tfp_sprintf(buff, "%d.%1d%c", getBatteryVoltage() / 10, getBatteryVoltage() % 10, SYM_VOLT);
+        osdDisplayStatisticLabel(top++, "BATTERY", buff);
+    }
+
     if (osdConfig()->enabled_stats[OSD_STAT_MIN_RSSI]) {
         itoa(stats.min_rssi, buff, 10);
         strcat(buff, "%");
@@ -1265,17 +1277,23 @@ STATIC_UNIT_TESTED void osdRefresh(timeUs_t currentTimeUs)
         flyTime += deltaT;
         stats.armed_time += deltaT;
     } else if (osdStatsEnabled) {  // handle showing/hiding stats based on OSD disable switch position
-        if (IS_RC_MODE_ACTIVE(BOXOSD) && osdStatsVisible) {
-            osdStatsVisible = false;
-            displayClearScreen(osdDisplayPort);
-        } else if (!IS_RC_MODE_ACTIVE(BOXOSD)) {
-            if (!osdStatsVisible) {
-                osdStatsVisible = true;
-                osdStatsRefreshTimeUs = 0;
-            }
-            if (currentTimeUs >= osdStatsRefreshTimeUs) {
-                osdStatsRefreshTimeUs = currentTimeUs + REFRESH_1S;
-                osdShowStats(endBatteryVoltage);
+        if (displayIsGrabbed(osdDisplayPort)) {
+            osdStatsEnabled = false;
+            resumeRefreshAt = 0;
+            stats.armed_time = 0;
+        } else {
+            if (IS_RC_MODE_ACTIVE(BOXOSD) && osdStatsVisible) {
+                osdStatsVisible = false;
+                displayClearScreen(osdDisplayPort);
+            } else if (!IS_RC_MODE_ACTIVE(BOXOSD)) {
+                if (!osdStatsVisible) {
+                    osdStatsVisible = true;
+                    osdStatsRefreshTimeUs = 0;
+                }
+                if (currentTimeUs >= osdStatsRefreshTimeUs) {
+                    osdStatsRefreshTimeUs = currentTimeUs + REFRESH_1S;
+                    osdShowStats(endBatteryVoltage);
+                }
             }
         }
     }
